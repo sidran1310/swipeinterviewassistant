@@ -1,8 +1,10 @@
 
-// Utilities to parse resumes (PDF/DOCX) in the browser and extract fields.
-import * as pdfjsLib from 'pdfjs-dist';
-import 'pdfjs-dist/build/pdf.worker.min.js'; // ensures worker is bundled
+// CRA-safe PDF parsing using pdfjs-dist legacy build with bundled worker URL
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf';
+import pdfWorker from 'pdfjs-dist/legacy/build/pdf.worker.min.js';
 import mammoth from 'mammoth';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 export async function fileToArrayBuffer(file) {
   return await file.arrayBuffer();
@@ -35,7 +37,6 @@ export async function parseResumeToText(file) {
   throw new Error('Unsupported file type. Please upload PDF or DOCX.');
 }
 
-// Basic heuristics to extract fields.
 export function extractFieldsFromText(text) {
   const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
   const phoneMatch = text.replace(/\s+/g,' ').match(/(\+\d{1,3}[- ]?)?(\d{3}[- ]?\d{3}[- ]?\d{4}|\d{10,15})/);

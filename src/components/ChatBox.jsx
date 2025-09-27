@@ -3,14 +3,21 @@ import { List, Input, Button, Space, Typography, Card } from 'antd';
 
 const { Text } = Typography;
 
-export default function ChatBox({ messages = [], onSend }) {
+/**
+ * ChatBox
+ * Props:
+ *  - messages: [{role:'bot'|'user', text:string}]
+ *  - onSend: (text)=>void
+ *  - viewportHeight: number (px) -> limit visible chat height (e.g., 90-120px for ~3-4 lines)
+ */
+export default function ChatBox({ messages = [], onSend, viewportHeight = 110 }) {
   const [value, setValue] = useState('');
   const listRef = useRef(null);
 
   const handleSend = () => {
     const v = value.trim();
     if (!v) return;
-    onSend(v);
+    onSend?.(v);
     setValue('');
   };
 
@@ -24,7 +31,7 @@ export default function ChatBox({ messages = [], onSend }) {
     <Card size="small" style={{ maxWidth: 800 }}>
       <div
         ref={listRef}
-        style={{ maxHeight: 320, overflow: 'auto', paddingRight: 8, marginBottom: 8, border: '1px solid #f0f0f0', borderRadius: 8 }}
+        style={{ maxHeight: viewportHeight, overflow: 'auto', paddingRight: 8, marginBottom: 8, border: '1px solid #f0f0f0', borderRadius: 8 }}
       >
         <List
           dataSource={messages}
@@ -32,14 +39,14 @@ export default function ChatBox({ messages = [], onSend }) {
             <List.Item style={{ display: 'block', border: 'none', padding: '8px 12px' }} key={i}>
               <div style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
                 <div
-          style={{
-            background: m.role === 'user' ? '#1677ff' : '#f5f5f5',
-            color: m.role === 'user' ? 'white' : 'black',
-            padding: '8px 12px',
-            borderRadius: 12,
-            maxWidth: '70%',
-            whiteSpace: 'pre-wrap'
-          }}
+                  style={{
+                    background: m.role === 'user' ? '#1677ff' : '#f5f5f5',
+                    color: m.role === 'user' ? 'white' : 'black',
+                    padding: '8px 12px',
+                    borderRadius: 12,
+                    maxWidth: '70%',
+                    whiteSpace: 'pre-wrap'
+                  }}
                 >
                   <Text style={{ color: m.role === 'user' ? 'white' : 'rgba(0,0,0,0.88)' }}>
                     {m.text}
