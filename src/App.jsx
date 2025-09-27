@@ -19,8 +19,8 @@ export default function App() {
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      <Header style={{ background: '#fff', borderBottom: '1px solid #f0f0f0' }}>
-        <Title level={3} style={{ margin: 0 }}>AI-Powered Interview Assistant</Title>
+      <Header style={{ background: '#fff', borderBottom: '1px solid #f0f0f0', textAlign: 'center'}}>
+        <Title level={3} style={{ margin: 15}}>AI-Powered Interview Assistant</Title>
       </Header>
       <Content style={{ padding: 16 }}>
         <Tabs

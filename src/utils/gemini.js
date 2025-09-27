@@ -2,6 +2,8 @@
 import { DIFFICULTY_ORDER, TIME_LIMITS } from './constants';
 
 const API_KEY = process.env.REACT_APP_GEMINI_API_KEY;
+const MODEL = 'gemini-2.5-flash';
+const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY || ''}`;
 
 function fallbackQuestions() {
   const qs = [
@@ -13,7 +15,7 @@ function fallbackQuestions() {
     { difficulty: 'hard', text: 'Implement a robust error handling strategy in a Node.js API with centralized error middleware and logging.' },
   ];
   return qs.map((q, i) => ({
-    id: `q${i+1}`,
+    id: `q${i + 1}`,
     difficulty: q.difficulty,
     text: q.text,
     timeLimit: TIME_LIMITS[q.difficulty],
@@ -29,7 +31,7 @@ Include 2 easy, 2 medium, 2 hard. Keep each question concise.
 JSON only, no prose.`;
 
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`, {
+    const res = await fetch(ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }]}] }),
@@ -41,7 +43,7 @@ JSON only, no prose.`;
     if (start !== -1 && end !== -1) {
       const arr = JSON.parse(text.slice(start, end + 1));
       const normalized = arr.map((q, i) => ({
-        id: q.id || `q${i+1}`,
+        id: q.id || `q${i + 1}`,
         difficulty: q.difficulty,
         text: q.text,
         timeLimit: TIME_LIMITS[q.difficulty] || 60,
@@ -54,34 +56,16 @@ JSON only, no prose.`;
     }
     return fallbackQuestions();
   } catch (e) {
-    console.error('Gemini generation failed:', e);
+    console.error('Gemini question generation failed:', e);
     return fallbackQuestions();
   }
 }
 
 // -------- Scoring & Summary --------
-
-function fallbackScore(questions, answers) {
-  const scores = questions.map((q) => {
-    const a = answers.find(x => x.questionId === q.id)?.text || '';
-    const len = a.trim().split(/\s+/).length;
-    let base = q.difficulty === 'easy' ? 4 : q.difficulty === 'medium' ? 6 : 8;
-    let score = Math.min(10, Math.round(len / base));
-    if (!a) score = 0;
-    return {
-      questionId: q.id,
-      difficulty: q.difficulty,
-      score,
-      feedback: a ? 'Auto-scored (length heuristic).' : 'No answer provided.'
-    };
-  });
-  const finalScore = scores.reduce((acc, s) => acc + s.score, 0);
-  const summary = 'Auto-generated summary: candidate provided answers scored with a simple heuristic for demo purposes.';
-  return { scores, finalScore, summary };
-}
-
 export async function scoreAnswers({ candidate, questions, answers }) {
-  if (!API_KEY) return fallbackScore(questions, answers);
+  if (!API_KEY) {
+    throw new Error('Missing REACT_APP_GEMINI_API_KEY: cannot score without Gemini.');
+  }
 
   const payload = {
     candidate: { name: candidate.name, email: candidate.email, phone: candidate.phone },
@@ -100,34 +84,31 @@ Questions and Answers:
 ${JSON.stringify(payload, null, 2)}
 JSON only, no prose.`;
 
-  try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }]}] }),
-    });
-    const data = await res.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    const objStart = text.indexOf('{');
-    const objEnd = text.lastIndexOf('}');
-    if (objStart !== -1 && objEnd !== -1) {
-      const obj = JSON.parse(text.slice(objStart, objEnd + 1));
-      const byId = new Map(questions.map(q => [q.id, q]));
-      const scores = (obj.scores || []).map(s => ({
-        questionId: s.questionId,
-        difficulty: byId.get(s.questionId)?.difficulty || s.difficulty || 'easy',
-        score: typeof s.score === 'number' ? s.score : 0,
-        feedback: s.feedback || '',
-      }));
-      const finalScore = typeof obj.finalScore === 'number'
-        ? obj.finalScore
-        : scores.reduce((acc, s) => acc + (s.score || 0), 0);
-      const summary = obj.summary || 'Summary unavailable.';
-      return { scores, finalScore, summary };
-    }
-    return fallbackScore(questions, answers);
-  } catch (e) {
-    console.error('Gemini scoring failed:', e);
-    return fallbackScore(questions, answers);
+  const res = await fetch(ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }]}] }),
+  });
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+  const objStart = text.indexOf('{');
+  const objEnd = text.lastIndexOf('}');
+  if (objStart === -1 || objEnd === -1) {
+    throw new Error('Gemini scoring returned non-JSON output.');
   }
+
+  const obj = JSON.parse(text.slice(objStart, objEnd + 1));
+  const byId = new Map(questions.map(q => [q.id, q]));
+  const scores = (obj.scores || []).map(s => ({
+    questionId: s.questionId,
+    difficulty: byId.get(s.questionId)?.difficulty || s.difficulty || 'easy',
+    score: typeof s.score === 'number' ? s.score : 0,
+    feedback: s.feedback || '',
+  }));
+  const finalScore = typeof obj.finalScore === 'number'
+    ? obj.finalScore
+    : scores.reduce((acc, s) => acc + (s.score || 0), 0);
+  const summary = obj.summary || 'Summary unavailable.';
+  return { scores, finalScore, summary };
 }
