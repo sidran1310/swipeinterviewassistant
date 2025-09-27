@@ -6,6 +6,7 @@ const initialState = {
   email: '',
   phone: '',
   resumeMeta: null,
+
   // chat
   messages: [
     { role: 'bot', text: 'Welcome! Upload your resume, then we will collect any missing details.' }
@@ -17,8 +18,12 @@ const initialState = {
   questions: [],           // [{id, difficulty, text, timeLimit}]
   currentQuestionIndex: 0,
   answers: [],             // [{questionId, text, submittedAt, timedOut}]
-  finalScore: null,
-  summary: '',
+
+  // scoring
+  scoringStatus: 'idle',   // idle | scoring | done
+  scores: [],              // [{questionId, difficulty, score, feedback}]
+  finalScore: null,        // sum of per-question scores
+  summary: '',             // overall summary
 };
 
 const candidateSlice = createSlice({
@@ -46,6 +51,8 @@ const candidateSlice = createSlice({
       state.answers = [];
       state.finalScore = null;
       state.summary = '';
+      state.scores = [];
+      state.scoringStatus = 'idle';
     },
     setQuestions(state, action) {
       state.questions = action.payload || [];
@@ -66,6 +73,21 @@ const candidateSlice = createSlice({
         state.interviewStatus = 'finished';
       }
     },
+
+    // Scoring reducers
+    setScoringStatus(state, action) {
+      state.scoringStatus = action.payload;
+    },
+    setScores(state, action) {
+      state.scores = action.payload || [];
+    },
+    setFinalScore(state, action) {
+      state.finalScore = action.payload ?? null;
+    },
+    setSummary(state, action) {
+      state.summary = action.payload || '';
+    },
+
     resetCandidate() {
       return { ...initialState };
     },
@@ -80,6 +102,10 @@ export const {
   setQuestions,
   submitAnswer,
   nextQuestion,
+  setScoringStatus,
+  setScores,
+  setFinalScore,
+  setSummary,
   resetCandidate,
 } = candidateSlice.actions;
 

@@ -1,14 +1,16 @@
 
 import React, { useMemo, useState } from 'react';
-import { Card, Typography, Upload, Button, message, Descriptions, Space, Alert, Input } from 'antd';
-import { UploadOutlined, SaveOutlined, PlayCircleOutlined, SendOutlined } from '@ant-design/icons';
+import { Card, Typography, Upload, Button, message, Descriptions, Space, Alert, Input, Table } from 'antd';
+import { UploadOutlined, SaveOutlined, PlayCircleOutlined, SendOutlined, ReloadOutlined, TrophyOutlined, LoadingOutlined, SaveTwoTone } from '@ant-design/icons';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   setProfile, setMissingFields, addMessage,
-  startInterview, setQuestions, submitAnswer, nextQuestion
+  startInterview, setQuestions, submitAnswer, nextQuestion,
+  setScoringStatus, setScores, setFinalScore, setSummary
 } from '../redux/slices/candidateSlice';
+import { addOrUpdateCandidate } from '../redux/slices/rosterSlice';
 import { parseResumeToText, extractFieldsFromText } from '../utils/parseResume';
-import { generateQuestions } from '../utils/gemini';
+import { generateQuestions, scoreAnswers } from '../utils/gemini';
 import ChatBox from '../components/ChatBox';
 import Timer from '../components/Timer';
 import { TIME_LIMITS } from '../utils/constants';
@@ -53,7 +55,6 @@ export default function Interviewee() {
       setRawText(text);
       const fields = extractFieldsFromText(text);
       setExtracted(fields);
-      dispatch(addMessage({ role: 'bot', text: `I found — Name: ${fields.name || '—'}, Email: ${fields.email || '—'}, Phone: ${fields.phone || '—'}.` }));
       message.success('Parsed resume successfully.');
     } catch (err) {
       console.error(err);
@@ -80,15 +81,6 @@ export default function Interviewee() {
       resumeMeta: file ? { name: file.name, type: file.type, size: file.size } : candidate.resumeMeta,
     };
     dispatch(setProfile(payload));
-    dispatch(setMissingFields(missing));
-
-    if (missing.length) {
-      dispatch(addMessage({ role: 'bot', text: `Saved. I still need: ${missing.join(', ')}.` }));
-      const next = missing[0];
-      dispatch(addMessage({ role: 'bot', text: promptFor(next) }));
-    } else {
-      dispatch(addMessage({ role: 'bot', text: 'All set — Name, Email, and Phone captured.' }));
-    }
     message.success('Profile saved.');
   };
 
@@ -116,31 +108,17 @@ export default function Interviewee() {
   };
 
   const onSend = (userText) => {
-    dispatch(addMessage({ role: 'user', text: userText }));
-    const currentMissing = candidate.missingFields.length ? candidate.missingFields : missing;
+    const currentMissing = missing;
     if (!currentMissing.length) return;
-
     const currentField = currentMissing[0];
     const normalized = validateAndNormalize(currentField, userText);
     if (!normalized) {
-      dispatch(addMessage({ role: 'bot', text: `That doesn't look like a valid ${currentField}. ${promptFor(currentField)}` }));
-      return;
+      return message.warning(promptFor(currentField));
     }
     dispatch(setProfile({ [currentField]: normalized }));
-
-    const remaining = currentMissing.slice(1);
-    dispatch(setMissingFields(remaining));
-    if (remaining.length) {
-      dispatch(addMessage({ role: 'bot', text: `Got it. Still need: ${remaining.join(', ')}.` }));
-      dispatch(addMessage({ role: 'bot', text: promptFor(remaining[0]) }));
-    } else {
-      dispatch(addMessage({ role: 'bot', text: 'Great — all details obtained. You can start the interview below.' }));
-    }
   };
 
-  const storeMissingCount = candidate.missingFields.length;
-  const showChat = (storeMissingCount ? storeMissingCount : missing.length) > 0;
-  const allCaptured = Boolean(candidate.name && candidate.email && candidate.phone);
+  const allCaptured = Boolean(merged.name && merged.email && merged.phone);
 
   // --- Interview handlers ---
   const canStart = allCaptured && candidate.interviewStatus !== 'running';
@@ -174,22 +152,69 @@ export default function Interviewee() {
       setTimeout(() => setTimerRunning(true), 0);
     } else {
       setTimerRunning(false);
-      message.success('Interview completed. Scoring in the next step.');
+      message.success('Interview completed. You can now score your answers.');
     }
   };
+
+  // --- Scoring ---
+  const handleScore = async () => {
+    if (candidate.interviewStatus !== 'finished') {
+      return message.warning('Finish the interview before scoring.');
+    }
+    try {
+      dispatch(setScoringStatus('scoring'));
+      const result = await scoreAnswers({
+        candidate: { name: candidate.name, email: candidate.email, phone: candidate.phone },
+        questions: candidate.questions,
+        answers: candidate.answers,
+      });
+      dispatch(setScores(result.scores));
+      dispatch(setFinalScore(result.finalScore));
+      dispatch(setSummary(result.summary));
+      dispatch(setScoringStatus('done'));
+      message.success('Scoring completed.');
+
+      // NEW: auto-save snapshot to roster so interviewer tab fills immediately
+      const snapshot = {
+        name: candidate.name,
+        email: candidate.email,
+        phone: candidate.phone,
+        resumeMeta: candidate.resumeMeta,
+        finalScore: result.finalScore,
+        summary: result.summary,
+        questions: candidate.questions,
+        answers: candidate.answers,
+        scores: result.scores,
+        messages: candidate.messages,
+        createdAt: Date.now(),
+      };
+      dispatch(addOrUpdateCandidate(snapshot));
+    } catch (e) {
+      console.error(e);
+      dispatch(setScoringStatus('idle'));
+      message.error('Scoring failed.');
+    }
+  };
+
+  const columns = [
+    { title: 'Q#', dataIndex: 'questionId', width: 80 },
+    { title: 'Difficulty', dataIndex: 'difficulty', width: 100 },
+    { title: 'Score (0-10)', dataIndex: 'score', width: 120 },
+    { title: 'Feedback', dataIndex: 'feedback' },
+  ];
 
   return (
     <Card>
       <Title level={4}>Interviewee</Title>
-      <Paragraph>Upload your resume — I’ll show what I extracted, then ask only what’s missing. Once done, start the interview below.</Paragraph>
+      <Paragraph>Upload your resume — then start the interview, score your answers, and save to the dashboard.</Paragraph>
 
       <Space direction="vertical" size="large" style={{ width: '100%' }}>
-        <Space>
+        <Space wrap>
           <Upload beforeUpload={beforeUpload} maxCount={1} accept=".pdf,.doc,.docx">
             <Button icon={<UploadOutlined />}>Choose Resume</Button>
           </Upload>
           <Button type="primary" loading={parsing} onClick={handleParse}>Parse Resume</Button>
-          <Button icon={<SaveOutlined />} onClick={handleSave}>Save & Continue</Button>
+          <Button icon={<SaveOutlined />} onClick={handleSave}>Save Details</Button>
         </Space>
 
         {(merged.name || merged.email || merged.phone) && (
@@ -200,20 +225,7 @@ export default function Interviewee() {
           </Descriptions>
         )}
 
-        {showChat ? (
-          <>
-            <Alert
-              type="warning"
-              showIcon
-              message={<span>Missing: <Text code>{(storeMissingCount ? candidate.missingFields : missing).join(', ')}</Text></span>}
-            />
-            <ChatBox messages={candidate.messages} onSend={onSend} viewportHeight={110} />
-          </>
-        ) : (
-          allCaptured && <Alert type="success" showIcon message="All three details captured. You can start the interview below." />
-        )}
-
-        {/* --- Interview section is ALWAYS visible; Start is disabled until allCaptured --- */}
+        {/* --- Interview section --- */}
         <Card type="inner" title="Interview">
           <Space direction="vertical" size="middle" style={{ width: '100%' }}>
             <Space>
@@ -255,10 +267,67 @@ export default function Interviewee() {
             )}
 
             {candidate.interviewStatus === 'finished' && (
-              <Alert type="success" showIcon message="Interview finished. We’ll score your responses next." />
+              <>
+                <Alert type="success" showIcon message="Interview finished. Score your answers below." />
+                <Space wrap>
+                  <Button
+                    type="primary"
+                    icon={candidate.scoringStatus === 'scoring' ? <LoadingOutlined /> : <TrophyOutlined />}
+                    loading={candidate.scoringStatus === 'scoring'}
+                    onClick={handleScore}
+                  >
+                    {candidate.scoringStatus === 'scoring' ? 'Scoring…' : 'Score my answers'}
+                  </Button>
+                  {/* Keep manual save, but autosave already happens on scoring */}
+                  <Button
+                    type="default"
+                    icon={<SaveTwoTone />}
+                    disabled={candidate.scoringStatus !== 'done'}
+                    onClick={() => {
+                      const snapshot = {
+                        name: candidate.name,
+                        email: candidate.email,
+                        phone: candidate.phone,
+                        resumeMeta: candidate.resumeMeta,
+                        finalScore: candidate.finalScore,
+                        summary: candidate.summary,
+                        questions: candidate.questions,
+                        answers: candidate.answers,
+                        scores: candidate.scores,
+                        messages: candidate.messages,
+                        createdAt: Date.now(),
+                      };
+                      dispatch(addOrUpdateCandidate(snapshot));
+                      message.success('Saved to Interviewer Dashboard.');
+                    }}
+                  >
+                    Save to Dashboard
+                  </Button>
+                </Space>
+              </>
             )}
           </Space>
         </Card>
+
+        {/* --- Results --- */}
+        {candidate.scoringStatus === 'done' && (
+          <Card type="inner" title="Results">
+            <Alert
+              type="success"
+              showIcon
+              message={<span><Text strong>Final Score:</Text> {candidate.finalScore} / 60</span>}
+              description={candidate.summary}
+              style={{ marginBottom: 16 }}
+            />
+            <Table
+              rowKey={(r) => r.questionId}
+              columns={columns}
+              dataSource={candidate.scores}
+              pagination={false}
+              size="small"
+            />
+          </Card>
+        )}
 
       </Space>
     </Card>

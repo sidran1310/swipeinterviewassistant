@@ -3,16 +3,18 @@ import { persistReducer, persistStore } from 'redux-persist';
 import storage from 'redux-persist/lib/storage';
 import candidateReducer from './slices/candidateSlice';
 import sessionReducer from './slices/sessionSlice';
+import rosterReducer from './slices/rosterSlice';
 
 const rootReducer = combineReducers({
   candidate: candidateReducer,
   session: sessionReducer,
+  roster: rosterReducer,
 });
 
 const persistConfig = {
   key: 'root',
   storage,
-  whitelist: ['candidate', 'session'],
+  whitelist: ['candidate', 'session', 'roster'],
 };
 
 const persistedReducer = persistReducer(persistConfig, rootReducer);
