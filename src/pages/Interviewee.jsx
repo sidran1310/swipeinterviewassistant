@@ -1,7 +1,6 @@
-
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Card, Typography, Upload, Button, message, Descriptions, Space, Alert, Input, Table } from 'antd';
-import { UploadOutlined, SaveOutlined, PlayCircleOutlined, SendOutlined, ReloadOutlined, TrophyOutlined, LoadingOutlined, SaveTwoTone } from '@ant-design/icons';
+import { UploadOutlined, SaveOutlined, PlayCircleOutlined, SendOutlined, TrophyOutlined, LoadingOutlined, SaveTwoTone } from '@ant-design/icons';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   setProfile, setMissingFields, addMessage,
@@ -19,6 +18,10 @@ const { Paragraph, Title, Text } = Typography;
 const { TextArea } = Input;
 
 const REQUIRED = ['name','email','phone'];
+
+// helper for shallow array equality
+const arraysEqual = (a = [], b = []) =>
+  a.length === b.length && a.every((x, i) => x === b[i]);
 
 export default function Interviewee() {
   const dispatch = useDispatch();
@@ -73,6 +76,31 @@ export default function Interviewee() {
 
   const missing = useMemo(() => REQUIRED.filter((k) => !merged[k]), [merged]);
 
+  // sync missing fields + auto prompt, guarded to prevent infinite loops
+  const lastPromptRef = useRef(null);
+  useEffect(() => {
+    const prev = candidate.missingFields || [];
+    if (!arraysEqual(missing, prev)) {
+      dispatch(setMissingFields(missing));
+    }
+
+    const signature = missing.join('|');
+    if (missing.length && lastPromptRef.current !== signature) {
+      const need = missing.map((m) => m.toUpperCase()).join(', ');
+      const line = `I couldn’t find: ${need}. Please tell me your ${missing[0]}.`;
+
+      const last = candidate.messages[candidate.messages.length - 1];
+      if (!last || last.text !== line || last.role !== 'bot') {
+        dispatch(addMessage({ role: 'bot', text: line }));
+      }
+      lastPromptRef.current = signature;
+    }
+
+    if (!missing.length) {
+      lastPromptRef.current = null;
+    }
+  }, [missing, candidate.messages.length, dispatch, candidate.missingFields]);
+
   const handleSave = () => {
     const payload = {
       name: merged.name,
@@ -111,11 +139,34 @@ export default function Interviewee() {
     const currentMissing = missing;
     if (!currentMissing.length) return;
     const currentField = currentMissing[0];
+
+    dispatch(addMessage({ role: 'user', text: userText }));
+
     const normalized = validateAndNormalize(currentField, userText);
     if (!normalized) {
-      return message.warning(promptFor(currentField));
+      const prompt = promptFor(currentField);
+      dispatch(addMessage({ role: 'bot', text: prompt }));
+      message.warning(prompt);
+      return;
     }
+
     dispatch(setProfile({ [currentField]: normalized }));
+
+    const newMerged = { ...merged, [currentField]: normalized };
+    const stillMissing = REQUIRED.filter((k) => !newMerged[k]);
+
+    if (stillMissing.length) {
+      dispatch(addMessage({
+        role: 'bot',
+        text: `Got your ${currentField}. Now please share your ${stillMissing[0]}.`,
+      }));
+    } else {
+      dispatch(addMessage({
+        role: 'bot',
+        text: `All set! Name, email, and phone captured. You can start the interview now.`,
+      }));
+      message.success('All required details captured.');
+    }
   };
 
   const allCaptured = Boolean(merged.name && merged.email && merged.phone);
@@ -144,7 +195,6 @@ export default function Interviewee() {
     const text = (answer || '').trim();
     dispatch(submitAnswer({ questionId: q.id, text, timedOut }));
     setAnswer('');
-    // next
     dispatch(nextQuestion());
     const nextQ = candidate.questions[candidate.currentQuestionIndex + 1];
     if (nextQ) {
@@ -156,7 +206,6 @@ export default function Interviewee() {
     }
   };
 
-  // --- Scoring ---
   const handleScore = async () => {
     if (candidate.interviewStatus !== 'finished') {
       return message.warning('Finish the interview before scoring.');
@@ -174,7 +223,6 @@ export default function Interviewee() {
       dispatch(setScoringStatus('done'));
       message.success('Scoring completed.');
 
-      // NEW: auto-save snapshot to roster so interviewer tab fills immediately
       const snapshot = {
         name: candidate.name,
         email: candidate.email,
@@ -225,7 +273,23 @@ export default function Interviewee() {
           </Descriptions>
         )}
 
-        {/* --- Interview section --- */}
+        {missing.length > 0 && (
+          <Card type="inner" title="Quick details check">
+            <Alert
+              type="warning"
+              showIcon
+              message="Some details are missing"
+              description={`I still need: ${missing.join(', ')}`}
+              style={{ marginBottom: 12 }}
+            />
+            <ChatBox
+              messages={candidate.messages}
+              onSend={onSend}
+              viewportHeight={110}
+            />
+          </Card>
+        )}
+
         <Card type="inner" title="Interview">
           <Space direction="vertical" size="middle" style={{ width: '100%' }}>
             <Space>
@@ -278,7 +342,6 @@ export default function Interviewee() {
                   >
                     {candidate.scoringStatus === 'scoring' ? 'Scoring…' : 'Score my answers'}
                   </Button>
-                  {/* Keep manual save, but autosave already happens on scoring */}
                   <Button
                     type="default"
                     icon={<SaveTwoTone />}
@@ -309,7 +372,6 @@ export default function Interviewee() {
           </Space>
         </Card>
 
-        {/* --- Results --- */}
         {candidate.scoringStatus === 'done' && (
           <Card type="inner" title="Results">
             <Alert
@@ -328,7 +390,6 @@ export default function Interviewee() {
             />
           </Card>
         )}
-
       </Space>
     </Card>
   );
